@@ -1,0 +1,7 @@
+fastapi>=0.68.0
+uvicorn[standard]
+python-dotenv
+sqlalchemy>=2.0.0
+alembic
+pydantic-settings
+python-multipart
