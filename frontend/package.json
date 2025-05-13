@@ -5,9 +5,16 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:staging": "vite --mode staging",
+    "dev:prod": "vite --mode production",
     "build": "tsc -b && vite build",
+    "build:staging": "tsc -b && vite build --mode staging",
+    "build:prod": "tsc -b && vite build --mode production",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "start:dev": "node ./scripts/run.js dev",
+    "start:staging": "node ./scripts/run.js staging",
+    "start:prod": "node ./scripts/run.js prod"
   },
   "dependencies": {
     "react": "^19.1.0",

@@ -1,3 +1,4 @@
+import os
 from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
@@ -5,8 +6,9 @@ class Settings(BaseSettings):
     VERSION: str = "1.0.0"
     API_PREFIX: str = "/api"
     DATABASE_URL: str = "postgresql+asyncpg://user:password@localhost/dbname"
-
+    
     class Config:
         case_sensitive = True
+        env_file = os.getenv("ENV_FILE", ".env")
 
 settings = Settings()
