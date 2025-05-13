@@ -3,6 +3,9 @@
 REM Set environment file
 set ENV_FILE=.env.staging
 
+REM Change to the parent directory (frontend root)
+cd ..
+
 IF "%1"=="install" (
     echo Installing frontend dependencies...
     npm install

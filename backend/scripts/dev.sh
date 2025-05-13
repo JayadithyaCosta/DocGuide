@@ -3,16 +3,19 @@
 # Set environment file
 export ENV_FILE=.env.dev
 
+# Change to the parent directory (backend root)
+cd ..
+
 # Install dependencies if needed
 if [ "$1" == "install" ]; then
     echo "Installing backend dependencies..."
-    pip install -r ../requirements.txt
+    pip install -r requirements.txt
 fi
 
 # Run the application with hot reload
 if [ "$1" == "run" ]; then
     echo "Starting backend development server with .env.dev..."
-    uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+    python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 fi
 
 # Build the application

@@ -12,9 +12,9 @@
     "build:prod": "tsc -b && vite build --mode production",
     "lint": "eslint .",
     "preview": "vite preview",
-    "start:dev": "node ./scripts/run.js dev",
-    "start:staging": "node ./scripts/run.js staging",
-    "start:prod": "node ./scripts/run.js prod"
+    "start:dev": "cd scripts && run-env.bat dev",
+    "start:staging": "cd scripts && run-env.bat staging",
+    "start:prod": "cd scripts && run-env.bat prod"
   },
   "dependencies": {
     "react": "^19.1.0",

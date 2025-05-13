@@ -3,6 +3,9 @@
 # Set environment file
 export ENV_FILE=.env.production
 
+# Change to the parent directory (frontend root)
+cd ..
+
 # Install dependencies if needed
 if [ "$1" == "install" ]; then
     echo "Installing frontend dependencies..."

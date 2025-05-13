@@ -3,15 +3,18 @@
 REM Set environment file
 set ENV_FILE=.env.production
 
+REM Change to the parent directory (backend root)
+cd ..
+
 IF "%1"=="install" (
     echo Installing backend dependencies...
-    pip install -r ..\requirements.txt
+    pip install -r requirements.txt
     goto :eof
 )
 
 IF "%1"=="run" (
     echo Starting backend production server with .env.production...
-    uvicorn app.main:app --host 0.0.0.0 --port 8000
+    python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
     goto :eof
 )
 

@@ -3,16 +3,19 @@
 # Set environment file
 export ENV_FILE=.env.production
 
+# Change to the parent directory (backend root)
+cd ..
+
 # Install dependencies if needed
 if [ "$1" == "install" ]; then
     echo "Installing backend dependencies..."
-    pip install -r ../requirements.txt
+    pip install -r requirements.txt
 fi
 
 # Run the application
 if [ "$1" == "run" ]; then
     echo "Starting backend production server with .env.production..."
-    uvicorn app.main:app --host 0.0.0.0 --port 8000
+    python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 fi
 
 # Build the application
