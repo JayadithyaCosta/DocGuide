@@ -24,12 +24,17 @@ var/
 venv/
 ENV/
 env/
+.venv/
 
 # Testing
 .coverage
 htmlcov/
 .pytest_cache/
 .tox/
+.nox/
+coverage.xml
+*.cover
+.hypothesis/
 
 # Local development settings
 .env
@@ -43,11 +48,15 @@ htmlcov/
 .vscode/
 *.swp
 *.swo
+.DS_Store
 
-# Git
-.git
-.gitignore
+# Database
+*.sqlite3
+*.db
 
-# Docker
-Dockerfile
-docker-compose.yml
+# Logs
+logs/
+*.log
+
+# Alembic
+alembic/versions/__pycache__/
