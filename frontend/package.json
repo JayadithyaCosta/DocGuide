@@ -14,7 +14,10 @@
     "preview": "vite preview",
     "start:dev": "cd scripts && run-env.bat dev",
     "start:staging": "cd scripts && run-env.bat staging",
-    "start:prod": "cd scripts && run-env.bat prod"
+    "start:prod": "cd scripts && run-env.bat prod",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "react": "^19.1.0",
