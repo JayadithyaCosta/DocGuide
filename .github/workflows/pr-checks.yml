@@ -5,6 +5,8 @@ on:
     types: [opened, synchronize]
   pull_request_review:
     types: [submitted]
+  pull_request:
+    types: [closed]
 
 jobs:
   test-and-update-linear:
@@ -26,31 +28,12 @@ jobs:
           LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
           PR_TITLE: ${{ github.event.pull_request.title }}
           TEST_RESULT: ${{ steps.tests.outcome }}
-          PR_STATE: ${{ github.event.pull_request.merged == true && 'merged' || 'open' }}
+          PR_MERGED: ${{ github.event.pull_request.merged }}
+          PR_CLOSED: ${{ github.event.action == 'closed' }}
           REVIEW_STATE: ${{ github.event.review.state || '' }}
         run: |
           # Install jq for JSON parsing
           sudo apt-get update && sudo apt-get install -y jq
-
-          # Debug: Check if we can access Linear API at all
-          echo "Checking Linear API access..."
-          USER_INFO=$(curl --silent --request POST \
-            --url https://api.linear.app/graphql \
-            --header "Authorization: Bearer $LINEAR_API_KEY" \
-            --header "Content-Type: application/json" \
-            --data '{"query": "query { viewer { id name } }"}')
-          
-          echo "User info: $USER_INFO"
-          
-          # Debug: List all issues to see what's available
-          echo "Listing recent issues..."
-          ALL_ISSUES=$(curl --silent --request POST \
-            --url https://api.linear.app/graphql \
-            --header "Authorization: Bearer $LINEAR_API_KEY" \
-            --header "Content-Type: application/json" \
-            --data '{"query": "query { issues(first: 10) { nodes { id identifier title } } }"}')
-          
-          echo "Recent issues: $ALL_ISSUES"
 
           # Extract Linear Issue ID from PR title (e.g., "[ALPHA-15] Fix bug")
           ISSUE_IDENTIFIER=$(echo "$PR_TITLE" | grep -oP '(?<=\[)[A-Z]+-\d+(?=\])' || true)
@@ -74,76 +57,32 @@ jobs:
               \"query\": \"query { issues(filter: {identifier: {eq: \\\"$ISSUE_IDENTIFIER\\\"}}) { nodes { id identifier title team { states { id name } } } } }\"
             }")
           
-          echo "Query 1 result: $QUERY1"
-          
-          # Approach 2: Case-insensitive query
-          echo "Approach 2: Case-insensitive query"
-          QUERY2=$(curl --silent --request POST \
-            --url https://api.linear.app/graphql \
-            --header "Authorization: Bearer $LINEAR_API_KEY" \
-            --header "Content-Type: application/json" \
-            --data "{
-              \"query\": \"query { issues(filter: {identifier: {eqIgnoreCase: \\\"$ISSUE_IDENTIFIER\\\"}}) { nodes { id identifier title team { states { id name } } } } }\"
-            }")
-          
-          echo "Query 2 result: $QUERY2"
-          
-          # Approach 3: Search by title containing the identifier
-          echo "Approach 3: Search by title"
-          QUERY3=$(curl --silent --request POST \
-            --url https://api.linear.app/graphql \
-            --header "Authorization: Bearer $LINEAR_API_KEY" \
-            --header "Content-Type: application/json" \
-            --data "{
-              \"query\": \"query { issues(filter: {title: {contains: \\\"$ISSUE_IDENTIFIER\\\"}}) { nodes { id identifier title team { states { id name } } } } }\"
-            }")
-          
-          echo "Query 3 result: $QUERY3"
-          
-          # Try to use the results from any of the approaches
-          ISSUE_ID=""
-          TEAM_STATES=""
-          
-          # Try approach 1
+          # Try to use the results from approach 1
           ISSUE_ID=$(echo "$QUERY1" | jq -r '.data.issues.nodes[0].id')
-          if [ -n "$ISSUE_ID" ] && [ "$ISSUE_ID" != "null" ]; then
-            echo "Found issue ID from approach 1: $ISSUE_ID"
-            TEAM_STATES=$(echo "$QUERY1" | jq -r '.data.issues.nodes[0].team.states')
-          else
-            # Try approach 2
-            ISSUE_ID=$(echo "$QUERY2" | jq -r '.data.issues.nodes[0].id')
-            if [ -n "$ISSUE_ID" ] && [ "$ISSUE_ID" != "null" ]; then
-              echo "Found issue ID from approach 2: $ISSUE_ID"
-              TEAM_STATES=$(echo "$QUERY2" | jq -r '.data.issues.nodes[0].team.states')
-            else
-              # Try approach 3
-              ISSUE_ID=$(echo "$QUERY3" | jq -r '.data.issues.nodes[0].id')
-              if [ -n "$ISSUE_ID" ] && [ "$ISSUE_ID" != "null" ]; then
-                echo "Found issue ID from approach 3: $ISSUE_ID"
-                TEAM_STATES=$(echo "$QUERY3" | jq -r '.data.issues.nodes[0].team.states')
-              else
-                echo "Could not find issue with identifier $ISSUE_IDENTIFIER using any approach"
-                exit 0  # Exit with success to avoid failing the workflow
-              fi
-            fi
+          if [ -z "$ISSUE_ID" ] || [ "$ISSUE_ID" == "null" ]; then
+            echo "Could not find issue with identifier $ISSUE_IDENTIFIER"
+            exit 0  # Exit with success to avoid failing the workflow
           fi
           
           echo "Found actual issue ID: $ISSUE_ID"
+          
+          # Get the team states
+          TEAM_STATES=$(echo "$QUERY1" | jq -r '.data.issues.nodes[0].team.states')
           
           # List all available states
           echo "Available states:"
           echo "$TEAM_STATES" | jq -r '.[] | .name + ": " + .id'
           
           # Determine state ID based on PR and test status
-          if [ "$PR_STATE" == "merged" ]; then
-            echo "PR was merged, setting issue to Done state"
+          if [ "$PR_MERGED" == "true" ] && [ "$TEST_RESULT" == "success" ]; then
+            echo "PR was merged and tests passed, setting issue to Done state"
             TARGET_STATE="Done"
+          elif [ "$TEST_RESULT" == "success" ]; then
+            echo "Tests passed, setting issue to Ready for Merge state"
+            TARGET_STATE="Ready for Merge"
           elif [ "$REVIEW_STATE" == "approved" ]; then
             echo "PR was approved, setting issue to Ready for Merge state"
             TARGET_STATE="Ready for Merge"
-          elif [ "$TEST_RESULT" == "success" ]; then
-            echo "Tests passed, setting issue to In Review state"
-            TARGET_STATE="In Review"
           else
             echo "Tests failed or PR is open, setting issue to In Progress state"
             TARGET_STATE="In Progress"
@@ -171,7 +110,7 @@ jobs:
               else
                 echo "Using first available state ID: $STATE_ID"
               fi
-            }
+            fi
           fi
           
           echo "Using state ID: $STATE_ID"
