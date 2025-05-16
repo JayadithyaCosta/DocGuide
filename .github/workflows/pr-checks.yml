@@ -1,0 +1,101 @@
+name: PR Checks
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  test-and-update-linear:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      # Run your tests (example with pytest)
+      - name: Run Tests
+        run: |
+          echo "Running tests..."
+          # pytest tests/
+        continue-on-error: true
+        id: tests
+
+      - name: Update Linear Status
+        if: always() # Always run, even if tests fail
+        env:
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          TEST_RESULT: ${{ steps.tests.outcome }}
+        run: |
+          # Install jq for JSON parsing
+          sudo apt-get update && sudo apt-get install -y jq
+
+          # Debug: Check if we can access Linear API at all
+          echo "Checking Linear API access..."
+          USER_INFO=$(curl --silent --request POST \
+            --url https://api.linear.app/graphql \
+            --header "Authorization: Bearer $LINEAR_API_KEY" \
+            --header "Content-Type: application/json" \
+            --data '{"query": "query { viewer { id name } }"}')
+
+          echo "User info: $USER_INFO"
+
+          # Debug: List all issues to see what's available
+          echo "Listing recent issues..."
+          ALL_ISSUES=$(curl --silent --request POST \
+            --url https://api.linear.app/graphql \
+            --header "Authorization: Bearer $LINEAR_API_KEY" \
+            --header "Content-Type: application/json" \
+            --data '{"query": "query { issues(first: 5) { nodes { id identifier title } } }"}')
+
+          echo "Recent issues: $ALL_ISSUES"
+
+          # Extract Linear Issue ID from PR title (e.g., "[ALPHA-15] Fix bug")
+          ISSUE_IDENTIFIER=$(echo "$PR_TITLE" | grep -oP '(?<=\[)[A-Z]+-\d+(?=\])' || true)
+
+          if [ -z "$ISSUE_IDENTIFIER" ]; then
+            echo "No Linear issue identifier found in PR title"
+            exit 0
+          fi
+
+          echo "Found Linear issue identifier: $ISSUE_IDENTIFIER"
+
+          # Try different approaches to find the issue
+
+          # Approach 1: Direct query by identifier
+          echo "Approach 1: Direct query by identifier"
+          QUERY1=$(curl --silent --request POST \
+            --url https://api.linear.app/graphql \
+            --header "Authorization: Bearer $LINEAR_API_KEY" \
+            --header "Content-Type: application/json" \
+            --data "{
+              \"query\": \"query { issues(filter: {identifier: {eq: \\\"$ISSUE_IDENTIFIER\\\"}}) { nodes { id identifier title } } }\"
+            }")
+
+          echo "Query 1 result: $QUERY1"
+
+          # Approach 2: Case-insensitive query
+          echo "Approach 2: Case-insensitive query"
+          QUERY2=$(curl --silent --request POST \
+            --url https://api.linear.app/graphql \
+            --header "Authorization: Bearer $LINEAR_API_KEY" \
+            --header "Content-Type: application/json" \
+            --data "{
+              \"query\": \"query { issues(filter: {identifier: {eqIgnoreCase: \\\"$ISSUE_IDENTIFIER\\\"}}) { nodes { id identifier title } } }\"
+            }")
+
+          echo "Query 2 result: $QUERY2"
+
+          # Approach 3: Search by title containing the identifier
+          echo "Approach 3: Search by title"
+          QUERY3=$(curl --silent --request POST \
+            --url https://api.linear.app/graphql \
+            --header "Authorization: Bearer $LINEAR_API_KEY" \
+            --header "Content-Type: application/json" \
+            --data "{
+              \"query\": \"query { issues(filter: {title: {contains: \\\"$ISSUE_IDENTIFIER\\\"}}) { nodes { id identifier title } } }\"
+            }")
+
+          echo "Query 3 result: $QUERY3"
+
+          # For now, let's exit with success to avoid failing the workflow
+          echo "Debug complete - exiting with success"
+          exit 0
