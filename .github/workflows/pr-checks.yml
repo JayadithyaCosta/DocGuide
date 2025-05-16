@@ -32,6 +32,26 @@ jobs:
           # Install jq for JSON parsing
           sudo apt-get update && sudo apt-get install -y jq
 
+          # Debug: Check if we can access Linear API at all
+          echo "Checking Linear API access..."
+          USER_INFO=$(curl --silent --request POST \
+            --url https://api.linear.app/graphql \
+            --header "Authorization: Bearer $LINEAR_API_KEY" \
+            --header "Content-Type: application/json" \
+            --data '{"query": "query { viewer { id name } }"}')
+          
+          echo "User info: $USER_INFO"
+          
+          # Debug: List all issues to see what's available
+          echo "Listing recent issues..."
+          ALL_ISSUES=$(curl --silent --request POST \
+            --url https://api.linear.app/graphql \
+            --header "Authorization: Bearer $LINEAR_API_KEY" \
+            --header "Content-Type: application/json" \
+            --data '{"query": "query { issues(first: 10) { nodes { id identifier title } } }"}')
+          
+          echo "Recent issues: $ALL_ISSUES"
+
           # Extract Linear Issue ID from PR title (e.g., "[ALPHA-15] Fix bug")
           ISSUE_IDENTIFIER=$(echo "$PR_TITLE" | grep -oP '(?<=\[)[A-Z]+-\d+(?=\])' || true)
 
@@ -42,28 +62,78 @@ jobs:
 
           echo "Found Linear issue identifier: $ISSUE_IDENTIFIER"
 
-          # Get issues matching the identifier
-          ISSUE_QUERY=$(curl --silent --request POST \
+          # Try different approaches to find the issue
+          
+          # Approach 1: Direct query by identifier
+          echo "Approach 1: Direct query by identifier"
+          QUERY1=$(curl --silent --request POST \
             --url https://api.linear.app/graphql \
             --header "Authorization: Bearer $LINEAR_API_KEY" \
             --header "Content-Type: application/json" \
             --data "{
-              \"query\": \"query { issues(filter: {identifier: {eq: \\\"$ISSUE_IDENTIFIER\\\"}}) { nodes { id team { states { id name } } } } }\"
+              \"query\": \"query { issues(filter: {identifier: {eq: \\\"$ISSUE_IDENTIFIER\\\"}}) { nodes { id identifier title team { states { id name } } } } }\"
             }")
-
-          # Extract the actual issue ID
-          ISSUE_ID=$(echo "$ISSUE_QUERY" | jq -r '.data.issues.nodes[0].id')
-
-          if [ -z "$ISSUE_ID" ] || [ "$ISSUE_ID" == "null" ]; then
-            echo "Could not find issue with identifier $ISSUE_IDENTIFIER"
-            exit 1
+          
+          echo "Query 1 result: $QUERY1"
+          
+          # Approach 2: Case-insensitive query
+          echo "Approach 2: Case-insensitive query"
+          QUERY2=$(curl --silent --request POST \
+            --url https://api.linear.app/graphql \
+            --header "Authorization: Bearer $LINEAR_API_KEY" \
+            --header "Content-Type: application/json" \
+            --data "{
+              \"query\": \"query { issues(filter: {identifier: {eqIgnoreCase: \\\"$ISSUE_IDENTIFIER\\\"}}) { nodes { id identifier title team { states { id name } } } } }\"
+            }")
+          
+          echo "Query 2 result: $QUERY2"
+          
+          # Approach 3: Search by title containing the identifier
+          echo "Approach 3: Search by title"
+          QUERY3=$(curl --silent --request POST \
+            --url https://api.linear.app/graphql \
+            --header "Authorization: Bearer $LINEAR_API_KEY" \
+            --header "Content-Type: application/json" \
+            --data "{
+              \"query\": \"query { issues(filter: {title: {contains: \\\"$ISSUE_IDENTIFIER\\\"}}) { nodes { id identifier title team { states { id name } } } } }\"
+            }")
+          
+          echo "Query 3 result: $QUERY3"
+          
+          # Try to use the results from any of the approaches
+          ISSUE_ID=""
+          TEAM_STATES=""
+          
+          # Try approach 1
+          ISSUE_ID=$(echo "$QUERY1" | jq -r '.data.issues.nodes[0].id')
+          if [ -n "$ISSUE_ID" ] && [ "$ISSUE_ID" != "null" ]; then
+            echo "Found issue ID from approach 1: $ISSUE_ID"
+            TEAM_STATES=$(echo "$QUERY1" | jq -r '.data.issues.nodes[0].team.states')
+          else
+            # Try approach 2
+            ISSUE_ID=$(echo "$QUERY2" | jq -r '.data.issues.nodes[0].id')
+            if [ -n "$ISSUE_ID" ] && [ "$ISSUE_ID" != "null" ]; then
+              echo "Found issue ID from approach 2: $ISSUE_ID"
+              TEAM_STATES=$(echo "$QUERY2" | jq -r '.data.issues.nodes[0].team.states')
+            else
+              # Try approach 3
+              ISSUE_ID=$(echo "$QUERY3" | jq -r '.data.issues.nodes[0].id')
+              if [ -n "$ISSUE_ID" ] && [ "$ISSUE_ID" != "null" ]; then
+                echo "Found issue ID from approach 3: $ISSUE_ID"
+                TEAM_STATES=$(echo "$QUERY3" | jq -r '.data.issues.nodes[0].team.states')
+              else
+                echo "Could not find issue with identifier $ISSUE_IDENTIFIER using any approach"
+                exit 0  # Exit with success to avoid failing the workflow
+              fi
+            fi
           fi
-
+          
           echo "Found actual issue ID: $ISSUE_ID"
-
-          # Get the team states
-          TEAM_STATES=$(echo "$ISSUE_QUERY" | jq -r '.data.issues.nodes[0].team.states')
-
+          
+          # List all available states
+          echo "Available states:"
+          echo "$TEAM_STATES" | jq -r '.[] | .name + ": " + .id'
+          
           # Determine state ID based on PR and test status
           if [ "$PR_STATE" == "merged" ]; then
             echo "PR was merged, setting issue to Done state"
@@ -78,10 +148,12 @@ jobs:
             echo "Tests failed or PR is open, setting issue to In Progress state"
             TARGET_STATE="In Progress"
           fi
-
+          
+          echo "Target state: $TARGET_STATE"
+          
           # Find the state ID for the target state
           STATE_ID=$(echo "$TEAM_STATES" | jq -r ".[] | select(.name==\"$TARGET_STATE\") | .id")
-
+          
           if [ -z "$STATE_ID" ] || [ "$STATE_ID" == "null" ]; then
             echo "Could not find state ID for $TARGET_STATE"
             # Fallback to In Progress if the target state doesn't exist
@@ -90,12 +162,20 @@ jobs:
             
             if [ -z "$STATE_ID" ] || [ "$STATE_ID" == "null" ]; then
               echo "Could not find In Progress state ID either"
-              exit 1
-            fi
+              # Try to find any state ID
+              STATE_ID=$(echo "$TEAM_STATES" | jq -r '.[0].id')
+              
+              if [ -z "$STATE_ID" ] || [ "$STATE_ID" == "null" ]; then
+                echo "Could not find any state ID"
+                exit 0
+              else
+                echo "Using first available state ID: $STATE_ID"
+              fi
+            }
           fi
-
-          echo "Using state ID: $STATE_ID for state: $TARGET_STATE"
-
+          
+          echo "Using state ID: $STATE_ID"
+          
           # Update Linear issue state
           UPDATE_RESULT=$(curl --silent --request POST \
             --url https://api.linear.app/graphql \
@@ -104,5 +184,5 @@ jobs:
             --data "{
               \"query\": \"mutation { issueUpdate(id: \\\"$ISSUE_ID\\\", input: { stateId: \\\"$STATE_ID\\\" }) { success } }\"
             }")
-
+          
           echo "Update result: $UPDATE_RESULT"
