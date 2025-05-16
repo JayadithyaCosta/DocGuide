@@ -14,6 +14,13 @@ IF "%1"=="install" (
 
 IF "%1"=="run" (
     echo Starting backend development server with .env.dev...
+    echo Server will be available at:
+    echo   http://localhost:8000
+    echo   http://127.0.0.1:8000
+    for /f "tokens=4" %%a in ('ipconfig ^| findstr IPv4') do (
+        if not defined _ip set "_ip=%%a"
+    )
+    if defined _ip echo   http://%_ip%:8000
     python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
     goto :eof
 )
