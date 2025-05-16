@@ -1,9 +1,5 @@
 # Python
 __pycache__/
-*/__pycache__/
-*/*/__pycache__/
-*/*/*/__pycache__/
-*/*/*/*/__pycache__/
 *.py[cod]
 *$py.class
 *.so
@@ -23,45 +19,11 @@ var/
 *.egg-info/
 .installed.cfg
 *.egg
-*.pyc
 
-# Virtual Environment
-venv/
-ENV/
-env/
-.venv/
-
-# Testing
+# Coverage
 .coverage
+coverage_html_report/
 htmlcov/
-.pytest_cache/
-.tox/
-.nox/
+.coverage.*
 coverage.xml
 *.cover
-.hypothesis/
-
-# Local development settings
-.env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
-
-# IDE specific files
-.idea/
-.vscode/
-*.swp
-*.swo
-.DS_Store
-
-# Database
-*.sqlite3
-*.db
-
-# Logs
-logs/
-*.log
-
-# Alembic
-alembic/versions/__pycache__/
