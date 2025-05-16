@@ -3,6 +3,8 @@ name: PR Checks
 on:
   pull_request:
     types: [opened, synchronize]
+  pull_request_review:
+    types: [submitted]
 
 jobs:
   test-and-update-linear:
@@ -24,29 +26,11 @@ jobs:
           LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
           PR_TITLE: ${{ github.event.pull_request.title }}
           TEST_RESULT: ${{ steps.tests.outcome }}
+          PR_STATE: ${{ github.event.pull_request.merged == true && 'merged' || 'open' }}
+          REVIEW_STATE: ${{ github.event.review.state || '' }}
         run: |
           # Install jq for JSON parsing
           sudo apt-get update && sudo apt-get install -y jq
-
-          # Debug: Check if we can access Linear API at all
-          echo "Checking Linear API access..."
-          USER_INFO=$(curl --silent --request POST \
-            --url https://api.linear.app/graphql \
-            --header "Authorization: Bearer $LINEAR_API_KEY" \
-            --header "Content-Type: application/json" \
-            --data '{"query": "query { viewer { id name } }"}')
-
-          echo "User info: $USER_INFO"
-
-          # Debug: List all issues to see what's available
-          echo "Listing recent issues..."
-          ALL_ISSUES=$(curl --silent --request POST \
-            --url https://api.linear.app/graphql \
-            --header "Authorization: Bearer $LINEAR_API_KEY" \
-            --header "Content-Type: application/json" \
-            --data '{"query": "query { issues(first: 5) { nodes { id identifier title } } }"}')
-
-          echo "Recent issues: $ALL_ISSUES"
 
           # Extract Linear Issue ID from PR title (e.g., "[ALPHA-15] Fix bug")
           ISSUE_IDENTIFIER=$(echo "$PR_TITLE" | grep -oP '(?<=\[)[A-Z]+-\d+(?=\])' || true)
@@ -58,44 +42,67 @@ jobs:
 
           echo "Found Linear issue identifier: $ISSUE_IDENTIFIER"
 
-          # Try different approaches to find the issue
-
-          # Approach 1: Direct query by identifier
-          echo "Approach 1: Direct query by identifier"
-          QUERY1=$(curl --silent --request POST \
+          # Get issues matching the identifier
+          ISSUE_QUERY=$(curl --silent --request POST \
             --url https://api.linear.app/graphql \
             --header "Authorization: Bearer $LINEAR_API_KEY" \
             --header "Content-Type: application/json" \
             --data "{
-              \"query\": \"query { issues(filter: {identifier: {eq: \\\"$ISSUE_IDENTIFIER\\\"}}) { nodes { id identifier title } } }\"
+              \"query\": \"query { issues(filter: {identifier: {eq: \\\"$ISSUE_IDENTIFIER\\\"}}) { nodes { id team { states { id name } } } } }\"
             }")
 
-          echo "Query 1 result: $QUERY1"
+          # Extract the actual issue ID
+          ISSUE_ID=$(echo "$ISSUE_QUERY" | jq -r '.data.issues.nodes[0].id')
 
-          # Approach 2: Case-insensitive query
-          echo "Approach 2: Case-insensitive query"
-          QUERY2=$(curl --silent --request POST \
+          if [ -z "$ISSUE_ID" ] || [ "$ISSUE_ID" == "null" ]; then
+            echo "Could not find issue with identifier $ISSUE_IDENTIFIER"
+            exit 1
+          fi
+
+          echo "Found actual issue ID: $ISSUE_ID"
+
+          # Get the team states
+          TEAM_STATES=$(echo "$ISSUE_QUERY" | jq -r '.data.issues.nodes[0].team.states')
+
+          # Determine state ID based on PR and test status
+          if [ "$PR_STATE" == "merged" ]; then
+            echo "PR was merged, setting issue to Done state"
+            TARGET_STATE="Done"
+          elif [ "$REVIEW_STATE" == "approved" ]; then
+            echo "PR was approved, setting issue to Ready for Merge state"
+            TARGET_STATE="Ready for Merge"
+          elif [ "$TEST_RESULT" == "success" ]; then
+            echo "Tests passed, setting issue to In Review state"
+            TARGET_STATE="In Review"
+          else
+            echo "Tests failed or PR is open, setting issue to In Progress state"
+            TARGET_STATE="In Progress"
+          fi
+
+          # Find the state ID for the target state
+          STATE_ID=$(echo "$TEAM_STATES" | jq -r ".[] | select(.name==\"$TARGET_STATE\") | .id")
+
+          if [ -z "$STATE_ID" ] || [ "$STATE_ID" == "null" ]; then
+            echo "Could not find state ID for $TARGET_STATE"
+            # Fallback to In Progress if the target state doesn't exist
+            echo "Falling back to In Progress state"
+            STATE_ID=$(echo "$TEAM_STATES" | jq -r '.[] | select(.name=="In Progress") | .id')
+            
+            if [ -z "$STATE_ID" ] || [ "$STATE_ID" == "null" ]; then
+              echo "Could not find In Progress state ID either"
+              exit 1
+            fi
+          fi
+
+          echo "Using state ID: $STATE_ID for state: $TARGET_STATE"
+
+          # Update Linear issue state
+          UPDATE_RESULT=$(curl --silent --request POST \
             --url https://api.linear.app/graphql \
             --header "Authorization: Bearer $LINEAR_API_KEY" \
             --header "Content-Type: application/json" \
             --data "{
-              \"query\": \"query { issues(filter: {identifier: {eqIgnoreCase: \\\"$ISSUE_IDENTIFIER\\\"}}) { nodes { id identifier title } } }\"
+              \"query\": \"mutation { issueUpdate(id: \\\"$ISSUE_ID\\\", input: { stateId: \\\"$STATE_ID\\\" }) { success } }\"
             }")
 
-          echo "Query 2 result: $QUERY2"
-
-          # Approach 3: Search by title containing the identifier
-          echo "Approach 3: Search by title"
-          QUERY3=$(curl --silent --request POST \
-            --url https://api.linear.app/graphql \
-            --header "Authorization: Bearer $LINEAR_API_KEY" \
-            --header "Content-Type: application/json" \
-            --data "{
-              \"query\": \"query { issues(filter: {title: {contains: \\\"$ISSUE_IDENTIFIER\\\"}}) { nodes { id identifier title } } }\"
-            }")
-
-          echo "Query 3 result: $QUERY3"
-
-          # For now, let's exit with success to avoid failing the workflow
-          echo "Debug complete - exiting with success"
-          exit 0
+          echo "Update result: $UPDATE_RESULT"
