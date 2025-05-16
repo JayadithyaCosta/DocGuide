@@ -1,0 +1,59 @@
+name: PR Checks
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  test-and-update-linear:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      # Run your tests (example with pytest)
+      - name: Run Tests
+        run: pytest tests/
+        continue-on-error: true
+        id: tests
+
+      - name: Update Linear Status
+        if: always() # Always run, even if tests fail
+        env:
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          TEST_RESULT: ${{ steps.tests.outcome }}
+        run: |
+          # Extract Linear Issue ID from PR title (e.g., "[XYZ-123] Fix bug")
+          ISSUE_ID=$(echo "$PR_TITLE" | grep -oP '(?<=\[)[A-Z]+\-\d+(?=\])' || true)
+
+          if [ -z "$ISSUE_ID" ]; then
+            echo "No Linear issue ID found in PR title"
+            exit 0
+          fi
+
+          # First, get the issue to find available workflow states
+          ISSUE_DATA=$(curl --silent --request POST \
+            --url https://api.linear.app/graphql \
+            --header "Authorization: Bearer $LINEAR_API_KEY" \
+            --header "Content-Type: application/json" \
+            --data "{
+              \"query\": \"query { issue(id: \\\"$ISSUE_ID\\\") { team { states { id name } } } }\"
+            }")
+
+          # Determine state ID based on test result
+          if [ "$TEST_RESULT" == "success" ]; then
+            # Find "Done" state ID
+            STATE_ID=$(echo "$ISSUE_DATA" | jq -r '.data.issue.team.states[] | select(.name=="Done") | .id')
+          else
+            # Find "In Progress" or similar state ID
+            STATE_ID=$(echo "$ISSUE_DATA" | jq -r '.data.issue.team.states[] | select(.name=="In Progress") | .id')
+          fi
+
+          # Update Linear issue state
+          curl --request POST \
+            --url https://api.linear.app/graphql \
+            --header "Authorization: Bearer $LINEAR_API_KEY" \
+            --header "Content-Type: application/json" \
+            --data "{
+              \"query\": \"mutation { issueUpdate(id: \\\"$ISSUE_ID\\\", input: { stateId: \\\"$STATE_ID\\\" }) { success } }\"
+            }"
