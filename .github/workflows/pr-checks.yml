@@ -12,11 +12,23 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      # Run your tests (example with pytest)
-      - name: Run Tests
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+          cache: 'pip'
+      
+      - name: Install dependencies
         run: |
-          echo "Running tests..."
-          # pytest tests/
+          cd backend
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-cov
+      
+      - name: Run Tests with Coverage Check
+        run: |
+          cd backend
+          python -m pytest --cov=app --cov-report=xml --cov-fail-under=80 tests/
         continue-on-error: true
         id: tests
 

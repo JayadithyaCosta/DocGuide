@@ -58,10 +58,10 @@ jobs:
           pip install -r requirements.txt
           pip install pytest pytest-cov
       
-      - name: Run tests
+      - name: Run tests with coverage check
         run: |
           cd backend
-          python -m pytest --cov=app tests/
+          python -m pytest --cov=app --cov-fail-under=80 tests/
         env:
           ENV_FILE: .env.test
           DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost/docgenius_test
