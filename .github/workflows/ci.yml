@@ -64,7 +64,11 @@ jobs:
           python -m pytest --cov=app --cov-fail-under=80 tests/
         env:
           ENV_FILE: .env.test
-          DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost/docgenius_test
+          DB_USER: postgres
+          DB_PASSWORD: postgres
+          DB_NAME: docgenius_test
+          DB_HOST: localhost
+          DB_PORT: 5432
 
   frontend-tests:
     needs: detect-changes
