@@ -1,4 +1,4 @@
-# DocGenius
+# DocGuide
 
 Document management and analysis system.
 
